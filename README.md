@@ -9,15 +9,13 @@ Inspirado no AppImage, o AppFast permite empacotar seus scripts e aplicativos em
 ## ⚡ Instalação Rápida
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/SEU_USUARIO/appfast/main/get-appfast.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/Diegopam/appfast/main/get-appfast.sh | sudo bash
 ```
-
-> Substitua `SEU_USUARIO` pelo seu nome de usuário do GitHub.
 
 ### Instalação Manual
 
 ```bash
-git clone https://github.com/SEU_USUARIO/appfast.git
+git clone https://github.com/Diegopam/appfast.git
 cd appfast
 sudo ./install.sh
 ```
