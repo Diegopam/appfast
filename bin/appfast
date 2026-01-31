@@ -1,0 +1,302 @@
+#!/bin/bash
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                              APPFAST RUNTIME                               ║
+# ║           Executor de pacotes .AppFast - Shell-based executables           ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# Uso: appfast <arquivo.AppFast> [argumentos...]
+# Ou execute diretamente: ./arquivo.AppFast [argumentos...]
+
+set -e
+
+VERSION="1.0.0"
+MAGIC="APPFAST"
+HEADER_END="---PAYLOAD---"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Cores para output
+# ═══════════════════════════════════════════════════════════════════════════════
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Funções de utilidade
+# ═══════════════════════════════════════════════════════════════════════════════
+
+print_banner() {
+    echo -e "${CYAN}"
+    echo "  ╔═══════════════════════════════════════╗"
+    echo "  ║     ${BOLD}⚡ AppFast Runtime v${VERSION}${NC}${CYAN}      ║"
+    echo "  ╚═══════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
+error() {
+    echo -e "${RED}[ERRO]${NC} $1" >&2
+    exit 1
+}
+
+warn() {
+    echo -e "${YELLOW}[AVISO]${NC} $1" >&2
+}
+
+info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+success() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
+
+show_help() {
+    print_banner
+    echo "Uso: appfast <arquivo.AppFast> [argumentos...]"
+    echo ""
+    echo "Opções:"
+    echo "  -h, --help       Mostra esta ajuda"
+    echo "  -v, --version    Mostra a versão"
+    echo "  -i, --info       Mostra informações do pacote"
+    echo "  -e, --extract    Extrai conteúdo sem executar"
+    echo "  -k, --keep       Mantém pasta temporária após execução"
+    echo ""
+    echo "Variáveis de ambiente disponíveis dentro do pacote:"
+    echo "  \$APPDIR          Pasta temporária de execução"
+    echo "  \$APPFAST_NAME    Nome do arquivo .AppFast"
+    echo "  \$APPFAST_PATH    Caminho completo do .AppFast"
+    echo "  \$APPFAST_ASSETS  Caminho para pasta assets/"
+    echo ""
+    exit 0
+}
+
+show_version() {
+    echo "AppFast Runtime v${VERSION}"
+    exit 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Validação do formato .AppFast
+# ═══════════════════════════════════════════════════════════════════════════════
+
+validate_appfast() {
+    local file="$1"
+    
+    if [[ ! -f "$file" ]]; then
+        error "Arquivo não encontrado: $file"
+    fi
+    
+    # Verificar magic bytes na primeira linha
+    local first_line
+    first_line=$(head -n 1 "$file" 2>/dev/null)
+    
+    if [[ "$first_line" != "#!APPFAST"* ]]; then
+        error "Arquivo inválido: não é um pacote .AppFast válido"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Extração do pacote
+# ═══════════════════════════════════════════════════════════════════════════════
+
+get_payload_offset() {
+    local file="$1"
+    # Encontrar offset de bytes do marcador (incluindo o próprio marcador e o \n após)
+    # grep -b retorna byte offset
+    local marker_info
+    marker_info=$(grep -ab "^${HEADER_END}$" "$file" | head -1)
+    
+    if [[ -z "$marker_info" ]]; then
+        echo ""
+        return
+    fi
+    
+    # Formato: "offset:---PAYLOAD---"
+    local offset
+    offset=$(echo "$marker_info" | cut -d: -f1)
+    
+    # Adicionar tamanho do marcador + newline
+    local marker_len=${#HEADER_END}
+    echo $((offset + marker_len + 1))
+}
+
+extract_appfast() {
+    local file="$1"
+    local dest="$2"
+    
+    local payload_offset
+    payload_offset=$(get_payload_offset "$file")
+    
+    if [[ -z "$payload_offset" ]]; then
+        error "Formato inválido: marcador de payload não encontrado"
+    fi
+    
+    # Extrair usando offset de bytes (tail -c +N começa no byte N)
+    tail -c +"$((payload_offset + 1))" "$file" | tar -xzf - -C "$dest" 2>/dev/null
+}
+
+get_package_info() {
+    local file="$1"
+    
+    # Extrair linhas de metadados (linhas 2 até a linha antes do payload)
+    # Como o header é sempre pequeno e baseado em texto, podemos usar sed
+    sed -n '2,/^---PAYLOAD---$/p' "$file" | head -n -1
+}
+
+show_info() {
+    local file="$1"
+    validate_appfast "$file"
+    
+    print_banner
+    echo -e "${BOLD}Informações do pacote:${NC}"
+    echo "─────────────────────────────────────────"
+    echo -e "Arquivo: ${CYAN}$file${NC}"
+    echo -e "Tamanho: ${CYAN}$(du -h "$file" | cut -f1)${NC}"
+    echo ""
+    echo -e "${BOLD}Metadados:${NC}"
+    get_package_info "$file"
+    echo ""
+    exit 0
+}
+
+extract_only() {
+    local file="$1"
+    local dest="${2:-.}"
+    
+    validate_appfast "$file"
+    
+    local basename
+    basename=$(basename "$file" .AppFast)
+    local extract_dir="$dest/$basename"
+    
+    mkdir -p "$extract_dir"
+    extract_appfast "$file" "$extract_dir"
+    
+    success "Extraído para: $extract_dir"
+    exit 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Execução principal
+# ═══════════════════════════════════════════════════════════════════════════════
+
+run_appfast() {
+    local file="$1"
+    shift
+    local args=("$@")
+    local keep_temp=false
+    
+    # Verificar flag --keep
+    for arg in "${args[@]}"; do
+        if [[ "$arg" == "-k" || "$arg" == "--keep" ]]; then
+            keep_temp=true
+        fi
+    done
+    
+    validate_appfast "$file"
+    
+    # Criar pasta temporária
+    local temp_dir
+    temp_dir=$(mktemp -d /tmp/appfast-XXXXXX)
+    
+    # Função de cleanup
+    cleanup() {
+        if [[ "$keep_temp" == false && -d "$temp_dir" ]]; then
+            rm -rf "$temp_dir"
+        fi
+    }
+    trap cleanup EXIT
+    
+    # Extrair conteúdo
+    extract_appfast "$file" "$temp_dir"
+    
+    # Verificar se prime existe
+    if [[ ! -f "$temp_dir/prime" ]]; then
+        error "Pacote inválido: arquivo 'prime' não encontrado"
+    fi
+    
+    # Tornar prime executável
+    chmod +x "$temp_dir/prime"
+    
+    # Configurar variáveis de ambiente
+    export APPDIR="$temp_dir"
+    export APPFAST_NAME="$(basename "$file")"
+    export APPFAST_PATH="$(realpath "$file")"
+    export APPFAST_ASSETS="$temp_dir/assets"
+    
+    # Executar prime (sem exec para permitir cleanup)
+    cd "$temp_dir"
+    local exit_code=0
+    ./prime "${args[@]}" || exit_code=$?
+    
+    # Cleanup explícito
+    if [[ "$keep_temp" == false && -d "$temp_dir" ]]; then
+        rm -rf "$temp_dir"
+    fi
+    
+    exit $exit_code
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════════════════
+
+main() {
+    # Se executado sem argumentos
+    if [[ $# -eq 0 ]]; then
+        show_help
+    fi
+    
+    # Parse de argumentos
+    local file=""
+    local action="run"
+    
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                show_help
+                ;;
+            -v|--version)
+                show_version
+                ;;
+            -i|--info)
+                action="info"
+                shift
+                ;;
+            -e|--extract)
+                action="extract"
+                shift
+                ;;
+            -k|--keep)
+                shift
+                ;;
+            *)
+                if [[ -z "$file" ]]; then
+                    file="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+    
+    if [[ -z "$file" ]]; then
+        error "Nenhum arquivo .AppFast especificado"
+    fi
+    
+    case "$action" in
+        info)
+            show_info "$file"
+            ;;
+        extract)
+            extract_only "$file"
+            ;;
+        run)
+            run_appfast "$file" "$@"
+            ;;
+    esac
+}
+
+main "$@"

@@ -1,0 +1,48 @@
+#!/bin/bash
+# ═══════════════════════════════════════════════════════════════════════════════
+# Exemplo: Hello World AppFast
+# Este é o script principal (prime) que será executado
+# ═══════════════════════════════════════════════════════════════════════════════
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════════╗"
+echo "║         🎉 Olá do AppFast! Hello World funcionando!           ║"
+echo "╚═══════════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "📁 Variáveis de ambiente disponíveis:"
+echo "─────────────────────────────────────────────────────────────────"
+echo "  \$APPDIR         = $APPDIR"
+echo "  \$APPFAST_NAME   = $APPFAST_NAME"
+echo "  \$APPFAST_PATH   = $APPFAST_PATH"
+echo "  \$APPFAST_ASSETS = $APPFAST_ASSETS"
+echo ""
+
+echo "📄 Conteúdo do diretório \$APPDIR:"
+echo "─────────────────────────────────────────────────────────────────"
+ls -la "$APPDIR"
+echo ""
+
+echo "🖼️  Verificando ícone:"
+echo "─────────────────────────────────────────────────────────────────"
+if [[ -f "$APPFAST_ASSETS/icon.png" ]]; then
+    local_size=$(du -h "$APPFAST_ASSETS/icon.png" | cut -f1)
+    echo "  ✅ icon.png encontrado ($local_size)"
+else
+    echo "  ❌ icon.png não encontrado"
+fi
+echo ""
+
+# Demonstração de como executar outros scripts
+echo "🔧 Executando script auxiliar (se existir):"
+echo "─────────────────────────────────────────────────────────────────"
+if [[ -f "$APPDIR/helpers/utils.sh" ]]; then
+    source "$APPDIR/helpers/utils.sh"
+    echo "  ✅ helpers/utils.sh carregado"
+else
+    echo "  ℹ️  Nenhum script auxiliar neste exemplo"
+fi
+echo ""
+
+echo "✨ AppFast executou com sucesso!"
+echo ""

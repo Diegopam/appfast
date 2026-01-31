@@ -1,0 +1,72 @@
+#!/bin/bash
+# ═══════════════════════════════════════════════════════════════════════════════
+# AppFast Thumbnailer
+# Extrai o ícone de um arquivo .AppFast para uso como thumbnail
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Uso: appfast-thumbnailer <arquivo.AppFast> <output.png> <tamanho>
+
+INPUT="$1"
+OUTPUT="$2"
+SIZE="${3:-128}"
+
+HEADER_END="---PAYLOAD---"
+
+# Verificar se é um AppFast válido
+first_line=$(head -n 1 "$INPUT" 2>/dev/null)
+if [[ "$first_line" != "#!APPFAST"* ]]; then
+    exit 1
+fi
+
+# Encontrar offset do payload
+get_payload_offset() {
+    local file="$1"
+    local marker_info
+    marker_info=$(grep -ab "^${HEADER_END}$" "$file" | head -1)
+    
+    if [[ -z "$marker_info" ]]; then
+        echo ""
+        return
+    fi
+    
+    local offset
+    offset=$(echo "$marker_info" | cut -d: -f1)
+    local marker_len=${#HEADER_END}
+    echo $((offset + marker_len + 1))
+}
+
+# Criar diretório temporário
+TEMP_DIR=$(mktemp -d)
+trap "rm -rf $TEMP_DIR" EXIT
+
+# Extrair apenas o icon.png
+payload_offset=$(get_payload_offset "$INPUT")
+
+if [[ -z "$payload_offset" ]]; then
+    exit 1
+fi
+
+# Extrair assets/icon.png do tar.gz
+tail -c +"$((payload_offset + 1))" "$INPUT" | tar -xzf - -C "$TEMP_DIR" --wildcards "*/icon.png" "./assets/icon.png" 2>/dev/null || \
+tail -c +"$((payload_offset + 1))" "$INPUT" | tar -xzf - -C "$TEMP_DIR" "assets/icon.png" 2>/dev/null
+
+# Encontrar o icon.png extraído
+ICON=$(find "$TEMP_DIR" -name "icon.png" | head -1)
+
+if [[ -z "$ICON" || ! -f "$ICON" ]]; then
+    exit 1
+fi
+
+# Redimensionar e copiar para output
+if command -v convert &> /dev/null; then
+    # ImageMagick disponível
+    convert "$ICON" -resize "${SIZE}x${SIZE}" "$OUTPUT"
+elif command -v ffmpeg &> /dev/null; then
+    # FFmpeg disponível
+    ffmpeg -y -i "$ICON" -vf "scale=${SIZE}:${SIZE}" "$OUTPUT" 2>/dev/null
+else
+    # Fallback: copiar sem redimensionar
+    cp "$ICON" "$OUTPUT"
+fi
+
+exit 0

@@ -1,0 +1,19 @@
+# Arquivos gerados
+*.AppFast
+dist/
+
+# Cache
+__pycache__/
+*.pyc
+
+# Temporários
+*.tmp
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

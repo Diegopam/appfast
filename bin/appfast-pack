@@ -1,0 +1,267 @@
+#!/bin/bash
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                           APPFAST PACKAGER                                 ║
+# ║              Empacotador de diretórios em formato .AppFast                 ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# Uso: appfast-pack <diretório> [-o output.AppFast]
+
+set -e
+
+VERSION="1.0.0"
+HEADER_END="---PAYLOAD---"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Cores para output
+# ═══════════════════════════════════════════════════════════════════════════════
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Funções de utilidade
+# ═══════════════════════════════════════════════════════════════════════════════
+
+print_banner() {
+    echo -e "${CYAN}"
+    echo "  ╔═══════════════════════════════════════╗"
+    echo "  ║    ${BOLD}📦 AppFast Packager v${VERSION}${NC}${CYAN}     ║"
+    echo "  ╚═══════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
+error() {
+    echo -e "${RED}[ERRO]${NC} $1" >&2
+    exit 1
+}
+
+warn() {
+    echo -e "${YELLOW}[AVISO]${NC} $1" >&2
+}
+
+info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+success() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
+
+show_help() {
+    print_banner
+    echo "Uso: appfast-pack <diretório> [opções]"
+    echo ""
+    echo "Opções:"
+    echo "  -o, --output <arquivo>   Nome do arquivo de saída (padrão: nome-do-diretório.AppFast)"
+    echo "  -n, --name <nome>        Nome do app nos metadados"
+    echo "  -V, --app-version <ver>  Versão do app (padrão: 1.0.0)"
+    echo "  -h, --help               Mostra esta ajuda"
+    echo "  -v, --version            Mostra a versão do empacotador"
+    echo ""
+    echo "Estrutura esperada do diretório:"
+    echo "  meu-app/"
+    echo "  ├── prime           # Script principal (obrigatório)"
+    echo "  ├── assets/"
+    echo "  │   └── icon.png   # Ícone do app (obrigatório)"
+    echo "  └── [outros arquivos...]"
+    echo ""
+    exit 0
+}
+
+show_version() {
+    echo "AppFast Packager v${VERSION}"
+    exit 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Validação do diretório de entrada
+# ═══════════════════════════════════════════════════════════════════════════════
+
+validate_source() {
+    local source_dir="$1"
+    
+    if [[ ! -d "$source_dir" ]]; then
+        error "Diretório não encontrado: $source_dir"
+    fi
+    
+    # Verificar arquivo prime
+    if [[ ! -f "$source_dir/prime" ]]; then
+        error "Arquivo 'prime' não encontrado em $source_dir"
+    fi
+    
+    # Verificar se prime é executável ou tem shebang
+    if ! head -1 "$source_dir/prime" | grep -q "^#!"; then
+        warn "Arquivo 'prime' não possui shebang (#!/bin/bash). Adicionando..."
+    fi
+    
+    # Verificar pasta assets
+    if [[ ! -d "$source_dir/assets" ]]; then
+        error "Pasta 'assets/' não encontrada em $source_dir"
+    fi
+    
+    # Verificar icon.png
+    if [[ ! -f "$source_dir/assets/icon.png" ]]; then
+        error "Arquivo 'assets/icon.png' não encontrado"
+    fi
+    
+    success "Estrutura do diretório válida"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Empacotamento
+# ═══════════════════════════════════════════════════════════════════════════════
+
+pack_appfast() {
+    local source_dir="$1"
+    local output_file="$2"
+    local app_name="$3"
+    local app_version="$4"
+    
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    local tarball
+    tarball=$(mktemp)
+    trap "rm -rf $temp_dir $tarball" EXIT
+    
+    info "Preparando pacote..."
+    
+    # Usar rsync em vez de cp para evitar problemas de sparse files (btrfs -> tmpfs)
+    # A flag --no-sparse força a cópia completa dos dados
+    if command -v rsync &> /dev/null; then
+        rsync -a --no-sparse "$source_dir"/* "$temp_dir/"
+    else
+        # Fallback: usar cp normal se rsync não estiver disponível
+        cp -r --no-dereference "$source_dir"/* "$temp_dir/"
+    fi
+    
+    # Garantir que prime é executável
+    chmod +x "$temp_dir/prime"
+    
+    # Criar arquivo tar.gz
+    tar -czf "$tarball" -C "$temp_dir" .
+    
+    info "Criando metadados..."
+    
+    # Criar timestamp
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    
+    info "Escrevendo pacote .AppFast..."
+    
+    # Criar arquivo final com formato texto simples
+    # Formato:
+    # Linha 1: #!APPFAST (magic bytes - também serve como shebang na teoria)
+    # Linhas 2-N: Metadados em formato chave=valor
+    # Linha marcadora: ---PAYLOAD---
+    # Resto: tar.gz binário
+    
+    {
+        echo "#!APPFAST v${VERSION}"
+        echo "name=$app_name"
+        echo "version=$app_version"
+        echo "created=$timestamp"
+        echo "$HEADER_END"
+    } > "$output_file"
+    
+    # Anexar payload binário
+    cat "$tarball" >> "$output_file"
+    
+    # Tornar executável
+    chmod +x "$output_file"
+    
+    # Calcular tamanho final
+    local final_size
+    final_size=$(du -h "$output_file" | cut -f1)
+    
+    echo ""
+    success "Pacote criado com sucesso!"
+    echo ""
+    echo -e "${BOLD}📦 Detalhes do pacote:${NC}"
+    echo "─────────────────────────────────────────"
+    echo -e "  Arquivo:  ${CYAN}$output_file${NC}"
+    echo -e "  Tamanho:  ${CYAN}$final_size${NC}"
+    echo -e "  Nome:     ${CYAN}$app_name${NC}"
+    echo -e "  Versão:   ${CYAN}$app_version${NC}"
+    echo ""
+    echo -e "${BOLD}▶ Para executar:${NC}"
+    echo -e "  ${GREEN}./$output_file${NC}"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════════════════
+
+main() {
+    # Se executado sem argumentos
+    if [[ $# -eq 0 ]]; then
+        show_help
+    fi
+    
+    local source_dir=""
+    local output_file=""
+    local app_name=""
+    local app_version="1.0.0"
+    
+    # Parse de argumentos
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                show_help
+                ;;
+            -v|--version)
+                show_version
+                ;;
+            -o|--output)
+                output_file="$2"
+                shift 2
+                ;;
+            -n|--name)
+                app_name="$2"
+                shift 2
+                ;;
+            -V|--app-version)
+                app_version="$2"
+                shift 2
+                ;;
+            *)
+                if [[ -z "$source_dir" ]]; then
+                    source_dir="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+    
+    if [[ -z "$source_dir" ]]; then
+        error "Nenhum diretório especificado"
+    fi
+    
+    # Resolver caminho absoluto
+    source_dir=$(realpath "$source_dir")
+    
+    # Definir nome padrão se não especificado
+    if [[ -z "$app_name" ]]; then
+        app_name=$(basename "$source_dir")
+    fi
+    
+    # Definir output padrão se não especificado
+    if [[ -z "$output_file" ]]; then
+        output_file="${app_name}.AppFast"
+    fi
+    
+    print_banner
+    
+    info "Diretório fonte: $source_dir"
+    info "Arquivo de saída: $output_file"
+    echo ""
+    
+    validate_source "$source_dir"
+    pack_appfast "$source_dir" "$output_file" "$app_name" "$app_version"
+}
+
+main "$@"

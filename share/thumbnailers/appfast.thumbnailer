@@ -1,0 +1,4 @@
+[Thumbnailer Entry]
+TryExec=appfast-thumbnailer
+Exec=appfast-thumbnailer %i %o %s
+MimeType=application/x-appfast;
